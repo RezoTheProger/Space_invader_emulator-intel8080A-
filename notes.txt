@@ -1,0 +1,15 @@
+CPU emulation - Simulates the processor of the original hardware
+Memory management - Handles RAM, ROM, and memory mapping
+Graphics processing - Renders display output
+Audio synthesis - Reproduces sound from the original system
+Input handling - Processes controller or keyboard input
+
+
+
+CPU : Intel808A
+|-> Memory: 64 KB precisely 65,536
+|-> 8bit bytes 
+|-> each byte has 16bit binary adress
+
+Data is stored in 8bit binary digits D7->D0 where D7 is MSB and D0 is LSB
+Instructions are usually from 1 byte to 3 bte in length

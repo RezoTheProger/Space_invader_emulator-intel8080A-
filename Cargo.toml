@@ -1,0 +1,10 @@
+[package]
+name = "space_invaders_emu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sdl2 = "0.35"          # graphics and input
+bitflags = "2.4"       # working with CPU flags
+log = "0.4"            # logging
+clap = "4.3"           # cl argument parsing

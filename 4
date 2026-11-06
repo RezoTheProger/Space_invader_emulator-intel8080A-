@@ -1,0 +1,179 @@
+//bitflags usage dont forget
+pub struct CPU {
+    pub memory: [u8; 0x10000],
+    pub registers: [u8; 8],
+    pub sp: u16,
+    pub pc: u16,
+    pub flag: u8,
+}
+impl CPU {
+    pub fn new() -> Self {
+        CPU {
+            memory: [0; 0x10000],
+            registers: [0, 0, 0, 0, 0, 0, 0, 0],
+            sp: 0xFFFF,
+            pc: 0x0000,
+            flag: 0x02,
+        }
+    }
+    pub fn load_rom(&mut self, rom_data: &[u8]) {
+        println!("Loading rom");
+        for (i, &byte) in rom_data.iter().enumerate() {
+            self.memory[i] = byte;
+        }
+    }
+    pub fn fetch(&mut self) -> u8 {
+        self.pc += 1;
+        self.memory[(self.pc - 1) as usize]
+    }
+    pub fn decode(&mut self, opcode: u8) {
+        let separated: [u8; 3] = mask(opcode);
+        match separated[0] {
+            0 => {
+                self.mvi(separated[1], separated[2]);
+            }
+            1 => {
+                self.mov(separated[1], separated[2]);
+            }
+            2 => {
+                self.ari(separated[1], separated[2]);
+            }
+            3 => {
+                self.ctrl(separated[1], separated[2]);
+            }
+            _ => {
+                println!("somehow an error occured");
+                return;
+            }
+        }
+    }
+    fn mvi(&mut self, register: u8, instruction: u8) {
+        if instruction == 0 {
+            println!("nothing  happened (NOP)");
+        }
+        if instruction == 6 {
+            println!("MVI");
+            let source: u8 = self.fetch();
+            println!("index: {}", register);
+            if register == 6 {
+                self.memory[self.get_hl() as usize] = source;
+            } else {
+                self.registers[register as usize] = source;
+            }
+        }
+    }
+    fn mov(&mut self, destination: u8, source: u8) {
+        println!("mov");
+
+        match (source, destination) {
+            (6, 6) => {
+                println!("halt");
+                return;
+            }
+            (6, _) => {
+                println!("index: {}", destination);
+                self.registers[destination as usize] = self.memory[self.get_hl() as usize].clone();
+            }
+            (_, 6) => {
+                self.memory[self.get_hl() as usize] = self.registers[source as usize].clone();
+            }
+            (_, _) => {
+                println!("index: {}", destination);
+                self.registers[destination as usize] = self.registers[source as usize].clone();
+            }
+        }
+    }
+    fn ari(&mut self, operation: u8, source: u8) {
+        //
+
+        match operation {
+            0 => {
+                //UNDERCONSTRUCTIONNNN
+                let mut calculate: u16 = self.registers[7] as u16;
+
+                if source == 6 {
+                    let add = self.memory[self.get_hl() as usize] as u16;
+                    if (calculate & 0x0F) + (add & 0x0F) > 0x0F {
+                        self.flag += 16;
+                    }
+                    calculate += add;
+                } else {
+                    let add = self.registers[source as usize] as u16;
+                    if (calculate & 0x0F) + (add & 0x0F) > 0x0F {
+                        self.flag += 16;
+                    }
+                    calculate += add;
+                }
+
+                println!("old A: {}", self.registers[7]);
+                if calculate >= 256 {
+                    println!("carry");
+                    calculate %= 256;
+                    self.flag += 1;
+                }
+                if calculate == 0 {
+                    println!("zero");
+                    self.flag += 64
+                }
+                if calculate & 0x70 == 0x70{
+                    self.flag+= 128;
+                }
+                //---------------pair------
+                let mut k: u8 = 0;
+                for i in 0..8 {
+                    if (calculate & 1 << i) == (1 << i) {
+                        k += 1;
+                    }
+                }
+                if k % 2 == 0 {
+                    println!("pair");
+                    self.flag += 4;
+                }
+                //---------------------
+
+                println!(" flag: {}", self.flag);
+                self.registers[7] = calculate as u8;
+
+                println!("new A: {}", self.registers[7]);
+                /*
+                 *carry +1 (done)
+                 *parity +4 (done)
+                 *aux carry +16(done)
+                 *zero +64 (done)
+                 * sign +128
+                 * */
+            }
+            1 => {}
+            2 => {}
+            3 => {}
+            4 => {}
+            5 => {}
+            6 => {}
+            7 => {}
+            _ => println!("Somehow an error in arithmetic"),
+        }
+        //
+    }
+    fn ctrl(&mut self, register: u8, instruction: u8) {
+        //
+    }
+
+    fn get_hl(&mut self) -> u16 {
+        let output: u16 = (self.registers[4] as u16) << 8 | (self.registers[5] as u16);
+        println!("hl: {output}");
+        output
+    }
+}
+
+fn mask(input: u8) -> [u8; 3] {
+    let masks: [u8; 3] = [7, 56, 192];
+    let mut var: [u8; 3] = [0, 0, 0];
+    let mut k: u8 = 0;
+    for i in 0..3 {
+        //
+
+        var[2 - i] = (input & masks[i]) >> k;
+        k += 3;
+    }
+    return var;
+}
