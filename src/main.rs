@@ -1,52 +1,40 @@
 mod cpu;
+mod graphics;
 use cpu::CPU;
+use graphics::create_image;
 use std::fs;
-
 fn main() {
     println!("Hello, world!");
     let mut cpu: CPU = CPU::new();
-    /*
-    let mut h_file: Vec<u8> = fs::read("resources/invaders.h").unwrap();
-    let mut g_file: Vec<u8> = fs::read("resources/invaders.g").unwrap();
-    let mut f_file: Vec<u8> = fs::read("resources/invaders.f").unwrap();
-    let mut e_file: Vec<u8> = fs::read("resources/invaders.e").unwrap();
-    */
-    let mut test: Vec<u8> = fs::read("resources/TST8080.COM").unwrap();
-    tester(&mut cpu, &mut test);
 
-    test = fs::read("resources/8080PRE.COM").unwrap();
+    let h_file: Vec<u8> = fs::read("resources/invaders.h").unwrap();
+    let g_file: Vec<u8> = fs::read("resources/invaders.g").unwrap();
+    let f_file: Vec<u8> = fs::read("resources/invaders.f").unwrap();
+    let e_file: Vec<u8> = fs::read("resources/invaders.e").unwrap();
 
-    cpu = CPU::new();
-    tester(&mut cpu, &mut test);
-    test = fs::read("resources/8080EXM.COM").unwrap();
-    cpu = CPU::new();
-    tester(&mut cpu, &mut test);
-    test = fs::read("resources/8080EXER.COM").unwrap();
-    cpu = CPU::new();
-    tester(&mut cpu, &mut test);
-    test = fs::read("resources/CPUTEST.COM").unwrap();
-    cpu = CPU::new();
-    tester(&mut cpu, &mut test);
-}
-fn tester(cpu: &mut CPU, test: &mut Vec<u8>) {
-    let mut rom_data: Vec<u8> = Vec::new();
-    rom_data.append(test);
-    cpu.load_rom(&rom_data);
-    let mut opcode: u8 = cpu.memory[cpu.pc as usize];
-    loop {
-        if cpu.halted {
-            println!("Cpu is halted");
-            break;
-        }
-        if cpu.pc == 0x0000 {
-            break;
-        }
-        if cpu.pc == 0x0005 {
-            cpu.bdos();
-            continue;
+    cpu.load_rom(&h_file, 0x0000);
+    cpu.load_rom(&g_file, 0x0800);
+    cpu.load_rom(&f_file, 0x1000);
+    cpu.load_rom(&e_file, 0x1800);
+
+    for _ in 0..60 {
+        for _ in 0..3_500 {
+            step(&mut cpu);
         }
 
-        opcode = cpu.fetch();
-        cpu.decode(opcode);
+        cpu.interrupt(1);
+        for _ in 0..3_500 {
+            step(&mut cpu);
+        }
+        cpu.interrupt(2);
     }
+}
+fn step(cpu: &mut CPU) {
+    if cpu.halted {
+        println!("Cpu is halted");
+        return;
+    }
+
+    let opcode = cpu.fetch();
+    cpu.decode(opcode);
 }

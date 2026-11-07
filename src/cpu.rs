@@ -6,6 +6,7 @@ pub struct CPU {
     pub pc: u16,
     pub flag: u8,
     pub halted: bool,
+    pub inte: bool,
 }
 impl CPU {
     pub fn new() -> Self {
@@ -14,14 +15,15 @@ impl CPU {
             registers: [0, 0, 0, 0, 0, 0, 0, 0],
             ports: [0; 256],
             sp: 0xFFFF,
-            pc: 0x100,
+            pc: 0x0000,
             flag: 0x02,
             halted: false,
+            inte: false,
         }
     }
-    pub fn load_rom(&mut self, rom_data: &[u8]) {
+    pub fn load_rom(&mut self, rom_data: &[u8], position: u16) {
         for (i, &byte) in rom_data.iter().enumerate() {
-            self.memory[0x0100 + i] = byte;
+            self.memory[position as usize + i] = byte;
         }
     }
     pub fn fetch(&mut self) -> u8 {
@@ -561,8 +563,14 @@ impl CPU {
                     (self.registers[4], self.registers[5]) = (self.registers[2], self.registers[3]);
                     (self.registers[2], self.registers[3]) = separate(temp);
                 }
-                6 => {}
-                7 => {}
+                6 => {
+                    //DI
+                    self.inte = false;
+                }
+                7 => {
+                    //EI
+                    self.inte = true;
+                }
                 _ => {}
             },
             4 => {
@@ -634,7 +642,7 @@ impl CPU {
                 }
             },
             7 => {
-                self.rst(variant);
+                self.rst(variant as u16);
             }
             _ => {
                 println!("Error vro");
@@ -706,6 +714,10 @@ impl CPU {
         self.check_parity(&result);
     }
 
+    pub fn interrupt(&mut self, option: u16) {
+        self.inte = false;
+        self.rst(option);
+    }
     //--------------Auxilary functions-----------------------
     pub fn bdos(&mut self) {
         match self.registers[1] {
@@ -811,9 +823,9 @@ impl CPU {
         self.push(self.pc.wrapping_add(2) as u16);
         self.jump();
     }
-    fn rst(&mut self, variant: u8) {
-        self.push(self.pc as u16);
-        self.pc = (variant as u16) * 8;
+    fn rst(&mut self, variant: u16) {
+        self.push(self.pc);
+        self.pc = variant.wrapping_mul(8);
     }
     fn matcher<F>(&mut self, variant: u8, f: F)
     where

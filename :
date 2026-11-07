@@ -1,0 +1,909 @@
+pub struct CPU {
+    pub memory: [u8; 0x10000],
+    pub registers: [u8; 8],
+    pub ports: [u8; 256],
+    pub sp: u16,
+    pub pc: u16,
+    pub flag: u8,
+    pub halted: bool,
+    pub INTE: bool,
+}
+impl CPU {
+    pub fn new() -> Self {
+        CPU {
+            memory: [0; 0x10000],
+            registers: [0, 0, 0, 0, 0, 0, 0, 0],
+            ports: [0; 256],
+            sp: 0xFFFF,
+            pc: 0x100,
+            flag: 0x02,
+            halted: false,
+        }
+    }
+    pub fn load_rom(&mut self, rom_data: &[u8]) {
+        for (i, &byte) in rom_data.iter().enumerate() {
+            self.memory[0x0100 + i] = byte;
+        }
+    }
+    pub fn fetch(&mut self) -> u8 {
+        let byte = self.memory[self.pc as usize];
+        self.pc = self.pc.wrapping_add(1);
+        byte
+    }
+    pub fn decode(&mut self, opcode: u8) {
+        let separated: [u8; 3] = mask(opcode);
+        match separated[0] {
+            0 => {
+                self.optional(separated[1], separated[2]);
+            }
+            1 => {
+                self.mov(separated[1], separated[2]);
+            }
+            2 => {
+                self.ari(separated[1], separated[2]);
+            }
+            3 => {
+                self.ctrl(separated[1], separated[2]);
+            }
+            _ => {
+                println!("somehow an error occured");
+                return;
+            }
+        }
+    }
+    fn optional(&mut self, register: u8, instruction: u8) {
+        match instruction {
+            0 => {}
+            1 => match register {
+                //DAD( done) and LXI(done)
+                0 => {
+                    let a: u8 = self.fetch();
+                    let b: u8 = self.fetch();
+
+                    self.registers[1] = a;
+                    self.registers[0] = b;
+                }
+                1 => {
+                    self.flag &= 0xFE;
+                    let byte: u16 = ((self.registers[0] as u16) << 8) | self.registers[1] as u16;
+                    let hl_byte: u16 = concatenate(self.registers[4], self.registers[5]);
+                    let (sum, carry): (u16, bool) = byte.overflowing_add(hl_byte);
+                    self.flag |= if carry == true { 1 } else { 0 };
+                    self.registers[4] = (sum >> 8) as u8;
+                    self.registers[5] = sum as u8;
+                }
+                2 => {
+                    let a: u8 = self.fetch();
+                    let b: u8 = self.fetch();
+
+                    self.registers[3] = a;
+                    self.registers[2] = b;
+                }
+                3 => {
+                    self.flag &= 0xFE;
+                    let byte: u16 = ((self.registers[2] as u16) << 8) | self.registers[3] as u16;
+                    let hl_byte: u16 = concatenate(self.registers[4], self.registers[5]);
+                    let (sum, carry): (u16, bool) = byte.overflowing_add(hl_byte);
+                    self.flag |= if carry == true { 1 } else { 0 };
+                    self.registers[4] = (sum >> 8) as u8;
+                    self.registers[5] = sum as u8;
+                }
+                4 => {
+                    let a: u8 = self.fetch();
+                    let b: u8 = self.fetch();
+
+                    self.registers[5] = a;
+                    self.registers[4] = b;
+                }
+                5 => {
+                    self.flag &= 0xFE;
+                    let hl_byte: u16 = concatenate(self.registers[4], self.registers[5]);
+                    let (sum, carry): (u16, bool) = hl_byte.overflowing_add(hl_byte);
+                    self.flag |= if carry == true { 1 } else { 0 };
+                    self.registers[4] = (sum >> 8) as u8;
+                    self.registers[5] = sum as u8;
+                }
+                6 => {
+                    let a: u8 = self.fetch();
+                    let b: u8 = self.fetch();
+
+                    self.sp = concatenate(b, a);
+                }
+                7 => {
+                    self.flag &= 0xFE;
+                    let byte: u16 = self.sp;
+                    let hl_byte: u16 = concatenate(self.registers[4], self.registers[5]);
+                    let (sum, carry): (u16, bool) = byte.overflowing_add(hl_byte);
+                    self.flag |= if carry == true { 1 } else { 0 };
+                    self.registers[4] = (sum >> 8) as u8;
+                    self.registers[5] = sum as u8;
+                }
+                _ => {
+                    println!("Error occured at LXI/DAD")
+                }
+            },
+            2 => {
+                match register {
+                    0 => {
+                        //STAX B
+                        let byte: u16 =
+                            ((self.registers[0] as u16) << 8) | self.registers[1] as u16;
+                        self.memory[byte as usize] = self.registers[7];
+                    }
+                    1 => {
+                        //LDAX B
+
+                        let byte: u16 =
+                            ((self.registers[0] as u16) << 8) | self.registers[1] as u16;
+                        self.registers[7] = self.memory[byte as usize];
+                    }
+                    2 => {
+                        //STAX D
+                        let byte: u16 =
+                            ((self.registers[2] as u16) << 8) | self.registers[3] as u16;
+                        self.memory[byte as usize] = self.registers[7];
+                    }
+                    3 => {
+                        let byte: u16 =
+                            ((self.registers[2] as u16) << 8) | self.registers[3] as u16;
+                        self.registers[7] = self.memory[byte as usize];
+                    }
+                    4 => {
+                        //SHLD
+                        let low: u8 = self.fetch();
+                        let high: u8 = self.fetch();
+                        let byte: u16 = ((high as u16) << 8) | low as u16;
+                        self.memory[byte as usize] = self.registers[5];
+                        self.memory[byte.wrapping_add(1) as usize] = self.registers[4];
+                    }
+                    5 => {
+                        //LHLD
+                        let low: u8 = self.fetch();
+                        let high: u8 = self.fetch();
+                        let byte: u16 = ((high as u16) << 8) | low as u16;
+                        self.registers[5] = self.memory[byte as usize];
+                        self.registers[4] = self.memory[byte.wrapping_add(1) as usize];
+                    }
+                    6 => {
+                        //STA
+                        let low: u8 = self.fetch();
+                        let high: u8 = self.fetch();
+                        let byte: u16 = ((high as u16) << 8) | low as u16;
+                        self.memory[byte as usize] = self.registers[7];
+                    }
+                    7 => {
+                        //LDA
+                        let low: u8 = self.fetch();
+                        let high: u8 = self.fetch();
+                        let byte: u16 = ((high as u16) << 8) | low as u16;
+                        self.registers[7] = self.memory[byte as usize];
+                    }
+                    _ => {
+                        println!("lol some issue");
+                    }
+                }
+            }
+            3 => {
+                //INX and DCX
+                match register {
+                    0 => {
+                        //INX B
+                        let (sum, _) =
+                            concatenate(self.registers[0], self.registers[1]).overflowing_add(1);
+                        (self.registers[0], self.registers[1]) = separate(sum);
+                    }
+                    1 => {
+                        let (sum, _) =
+                            concatenate(self.registers[0], self.registers[1]).overflowing_sub(1);
+                        (self.registers[0], self.registers[1]) = separate(sum);
+                    }
+                    2 => {
+                        //INX D
+                        let (sum, _) =
+                            concatenate(self.registers[2], self.registers[3]).overflowing_add(1);
+                        (self.registers[2], self.registers[3]) = separate(sum);
+                    }
+                    3 => {
+                        let (sum, _) =
+                            concatenate(self.registers[2], self.registers[3]).overflowing_sub(1);
+                        (self.registers[2], self.registers[3]) = separate(sum);
+                    }
+                    4 => {
+                        //INX H
+                        let (sum, _) = self.get_hl().overflowing_add(1);
+                        (self.registers[4], self.registers[5]) = separate(sum);
+                    }
+                    5 => {
+                        let (sum, _) = self.get_hl().overflowing_sub(1);
+                        (self.registers[4], self.registers[5]) = separate(sum);
+                    }
+                    6 => {
+                        //INX SP
+                        let (sum, _) = self.sp.overflowing_add(1);
+                        self.sp = sum;
+                    }
+                    7 => {
+                        let (sum, _) = self.sp.overflowing_sub(1);
+                        self.sp = sum;
+                    }
+                    _ => {
+                        println!("ERR");
+                    }
+                }
+            }
+            4 => {
+                //INR
+                self.flag &= 0x03;
+                let byte: u8 = if register == 6 {
+                    self.memory[self.get_hl() as usize]
+                } else {
+                    self.registers[register as usize]
+                };
+
+                let result = byte.wrapping_add(1);
+                self.aux_carry(0, byte as u16, 1, None);
+                self.check_sign(&result);
+                self.check_parity(&result);
+                self.check_zero(&result);
+                if register == 6 {
+                    self.memory[self.get_hl() as usize] = result;
+                } else {
+                    self.registers[register as usize] = result;
+                }
+            }
+            5 => {
+                //DCR
+                self.flag &= 0x03;
+                let byte: u8 = if register == 6 {
+                    self.memory[self.get_hl() as usize]
+                } else {
+                    self.registers[register as usize]
+                };
+
+                let result = byte.wrapping_sub(1);
+                self.aux_carry(1, byte as u16, 1, None);
+                self.check_sign(&result);
+                self.check_parity(&result);
+                self.check_zero(&result);
+                if register == 6 {
+                    self.memory[self.get_hl() as usize] = result;
+                } else {
+                    self.registers[register as usize] = result;
+                }
+            }
+            6 => {
+                let source: u8 = self.fetch();
+                if register == 6 {
+                    self.memory[self.get_hl() as usize] = source;
+                } else {
+                    self.registers[register as usize] = source;
+                }
+            }
+
+            7 => match register {
+                0 => {
+                    self.flag &= 0xFE;
+                    self.registers[7] = self.registers[7].rotate_left(1);
+                    self.flag |= 0x01 & self.registers[7];
+                }
+                1 => {
+                    self.flag &= 0xFE;
+                    self.registers[7] = self.registers[7].rotate_right(1);
+                    self.flag |= (0x80 & self.registers[7]).rotate_left(1);
+                }
+                2 => {
+                    let carry = self.flag & 0x01;
+                    self.flag &= 0xFE;
+                    self.flag |= (self.registers[7] & 0x80).rotate_left(1);
+                    self.registers[7] = (self.registers[7].rotate_left(1)) & 0xFE;
+                    self.registers[7] |= carry;
+                }
+                3 => {
+                    let carry = self.flag & 0x01;
+                    self.flag &= 0xFE;
+                    self.flag |= 0x01 & self.registers[7];
+                    self.registers[7] = (self.registers[7].rotate_right(1)) & 0x7F;
+                    self.registers[7] |= (carry).rotate_right(1);
+                }
+                4 => {
+                    let mut accumulator: u8 = self.registers[7];
+                    if (accumulator & 0x0F) > 9 || ((self.flag & 0x10) == 0x10) {
+                        if accumulator >= 0xFA {
+                            self.flag |= 0x01;
+                        }
+                        self.flag &= 0xEF;
+                        self.aux_carry(0, accumulator as u16, 6, None);
+                        accumulator = accumulator.wrapping_add(0x06);
+                    }
+                    if ((accumulator) >> 4) > 9 || ((self.flag & 0x01) == 0x01) {
+                        self.flag |= 0x01;
+                        accumulator = accumulator.wrapping_add(0x60);
+                    }
+                    self.registers[7] = accumulator;
+                    self.check_zero(&accumulator);
+                    self.check_sign(&accumulator);
+                    self.check_parity(&accumulator);
+                }
+                5 => {
+                    //CMA
+                    self.registers[7] = !self.registers[7];
+                }
+                6 => {
+                    //STC
+                    self.flag |= 0x01;
+                }
+                7 => {
+                    //CMC
+                    self.flag ^= 0x01;
+                }
+                _ => {
+                    println!("error in the 7th 00");
+                }
+            },
+            _ => {
+                println!("Something wong");
+            }
+        }
+    }
+    fn mov(&mut self, destination: u8, source: u8) {
+        match (source, destination) {
+            (6, 6) => {
+                self.halted = true;
+            }
+            (6, _) => {
+                self.registers[destination as usize] = self.memory[self.get_hl() as usize].clone();
+            }
+            (_, 6) => {
+                self.memory[self.get_hl() as usize] = self.registers[source as usize].clone();
+            }
+            (_, _) => {
+                self.registers[destination as usize] = self.registers[source as usize].clone();
+            }
+        }
+    }
+    fn ari(&mut self, operation: u8, source: u8) {
+        match operation {
+            0 => {
+                let add = if source == 6 {
+                    self.memory[self.get_hl() as usize] as u16
+                } else {
+                    self.registers[source as usize] as u16
+                };
+                self.ADD(add, None);
+            }
+            1 => {
+                let carry: u16 = (self.flag & 1) as u16;
+
+                let add = if source == 6 {
+                    self.memory[self.get_hl() as usize] as u16
+                } else {
+                    self.registers[source as usize] as u16
+                };
+                self.ADD(add, Some(carry));
+            }
+
+            2 => {
+                let sub: u16 = if source == 6 {
+                    self.memory[self.get_hl() as usize] as u16
+                } else {
+                    self.registers[source as usize] as u16
+                };
+                self.SUB(sub, None);
+            }
+            3 => {
+                let carry: u16 = (self.flag & 1) as u16;
+                let sub: u16 = if source == 6 {
+                    self.memory[self.get_hl() as usize] as u16
+                } else {
+                    self.registers[source as usize] as u16
+                };
+                self.SUB(sub, Some(carry));
+            }
+            4 => {
+                let ana: u8 = if source == 6 {
+                    self.memory[self.get_hl() as usize]
+                } else {
+                    self.registers[source as usize]
+                };
+                self.ANA(ana);
+            }
+            5 => {
+                let xor: u8 = if source == 6 {
+                    self.memory[self.get_hl() as usize]
+                } else {
+                    self.registers[source as usize]
+                };
+                self.XOR(xor);
+            }
+            6 => {
+                let or: u8 = if source == 6 {
+                    self.memory[self.get_hl() as usize]
+                } else {
+                    self.registers[source as usize]
+                };
+                self.OR(or);
+            }
+            7 => {
+                let cmp: u16 = if source == 6 {
+                    self.memory[self.get_hl() as usize] as u16
+                } else {
+                    self.registers[source as usize] as u16
+                };
+                self.CMP(cmp);
+            }
+            _ => println!("Somehow an error in arithmetic"),
+        }
+        //
+    }
+    fn ctrl(&mut self, variant: u8, instruction: u8) {
+        match instruction {
+            0 => {
+                match variant {
+                    0 => {
+                        let zero: bool = (self.flag & 0x40) == 0x40;
+                        if !zero {
+                            self.pc = self.pop();
+                        }
+                    }
+
+                    1 => {
+                        //RZ
+                        let zero: bool = (self.flag & 0x40) == 0x40;
+                        if zero {
+                            self.pc = self.pop();
+                        }
+                    }
+                    2 => {
+                        let carry: bool = (self.flag & 0x01) == 0x01;
+                        if !carry {
+                            self.pc = self.pop();
+                        }
+                    }
+                    3 => {
+                        let carry: bool = (self.flag & 0x01) == 0x01;
+                        if carry {
+                            self.pc = self.pop();
+                        }
+                    }
+                    4 => {
+                        let pair: bool = (self.flag & 0x04) == 0x04;
+                        if !pair {
+                            self.pc = self.pop();
+                        }
+                    }
+                    5 => {
+                        let pair: bool = (self.flag & 0x04) == 0x04;
+                        if pair {
+                            self.pc = self.pop();
+                        }
+                    }
+                    6 => {
+                        let is_negative: bool = (self.flag & 0x80) == 0x80;
+                        if !is_negative {
+                            self.pc = self.pop();
+                        }
+                    }
+                    7 => {
+                        let is_negative: bool = (self.flag & 0x80) == 0x80;
+                        if is_negative {
+                            self.pc = self.pop();
+                        }
+                    }
+                    _ => {
+                        println!("somehow an issue in control");
+                    }
+                }
+            }
+            1 => match variant {
+                0 => {
+                    let value: u16 = self.pop();
+                    self.registers[0] = (value >> 8) as u8;
+                    self.registers[1] = (value) as u8;
+                }
+                1 => {
+                    //ret
+                    self.pc = self.pop();
+                }
+                2 => {
+                    let value: u16 = self.pop();
+                    self.registers[2] = (value >> 8) as u8;
+                    self.registers[3] = (value) as u8;
+                }
+                4 => {
+                    let value: u16 = self.pop();
+                    self.registers[4] = (value >> 8) as u8;
+                    self.registers[5] = (value) as u8;
+                }
+                5 => {
+                    self.pc = self.get_hl();
+                }
+                6 => {
+                    let value: u16 = self.pop();
+                    self.registers[7] = (value >> 8) as u8;
+                    self.flag = ((value as u8) & 0xD7) | 0x02;
+                }
+                7 => {
+                    self.sp = self.get_hl();
+                }
+                _ => {
+                    println!("somehow an error67");
+                }
+            },
+            2 => {
+                let jumper = |cpu: &mut Self| cpu.jump();
+                self.matcher(variant, jumper);
+            }
+
+            3 => match variant {
+                0 => self.jump(),
+                1 => self.jump(),
+                2 => {
+                    //OUT
+                    let port = self.fetch() as usize;
+                    self.ports[port] = self.registers[7];
+                }
+                3 => {
+                    let port = self.fetch() as usize;
+                    self.registers[7] = self.ports[port];
+                }
+                4 => {
+                    //XTHL
+                    let temp: u8 = self.registers[5];
+                    let temp2: u8 = self.registers[4];
+
+                    self.registers[5] = self.memory[self.sp as usize];
+                    self.memory[self.sp as usize] = temp;
+
+                    self.registers[4] = self.memory[self.sp.wrapping_add(1) as usize];
+                    self.memory[self.sp.wrapping_add(1) as usize] = temp2;
+                }
+                5 => {
+                    let temp: u16 = self.get_hl();
+                    (self.registers[4], self.registers[5]) = (self.registers[2], self.registers[3]);
+                    (self.registers[2], self.registers[3]) = separate(temp);
+                }
+                6 => {}
+                7 => {}
+                _ => {}
+            },
+            4 => {
+                let caller = |cpu: &mut Self| cpu.call();
+                self.matcher(variant, caller);
+            }
+            5 => match variant {
+                0 => {
+                    let value: u16 = self.registers[1] as u16 | ((self.registers[0] as u16) << 8);
+                    self.push(value);
+                }
+                1 => {
+                    self.call();
+                }
+                2 => {
+                    let value: u16 = self.registers[3] as u16 | ((self.registers[2] as u16) << 8);
+                    self.push(value);
+                }
+                4 => {
+                    let value: u16 = self.registers[5] as u16 | ((self.registers[4] as u16) << 8);
+                    self.push(value);
+                }
+                6 => {
+                    let value: u16 = (self.flag as u16) | ((self.registers[7] as u16) << 8);
+                    self.push(value);
+                }
+                _ => {
+                    println!("somehow an error ");
+                    println!("variant: {}", variant);
+                }
+            },
+            6 => match variant {
+                0 => {
+                    let add = self.fetch() as u16;
+                    self.ADD(add, None);
+                }
+                1 => {
+                    let carry: u16 = (self.flag & 1) as u16;
+                    let add = self.fetch() as u16;
+                    self.ADD(add, Some(carry));
+                }
+                2 => {
+                    let sub = self.fetch() as u16;
+                    self.SUB(sub, None);
+                }
+                3 => {
+                    let carry: u16 = (self.flag & 1) as u16;
+                    let sub = self.fetch() as u16;
+                    self.SUB(sub, Some(carry));
+                }
+                4 => {
+                    let ana = self.fetch();
+                    self.ANA(ana);
+                }
+                5 => {
+                    let xor = self.fetch();
+                    self.XOR(xor);
+                }
+                6 => {
+                    let or = self.fetch();
+                    self.OR(or);
+                }
+                7 => {
+                    let cmp = self.fetch() as u16;
+                    self.CMP(cmp);
+                }
+                _ => {
+                    println!("somehow an err");
+                }
+            },
+            7 => {
+                self.rst(variant);
+            }
+            _ => {
+                println!("Error vro");
+            }
+        }
+    }
+    //--------------Arithmetic Bullshit----------------------
+
+    fn ADD(&mut self, add: u16, carry_in: Option<u16>) {
+        self.flag = 0x02;
+        let sum: u16 = self.registers[7] as u16;
+        self.aux_carry(0, sum, add, carry_in);
+        let result: u8 = self.check_carry(sum + add + carry_in.unwrap_or(0));
+        self.check_zero(&result);
+        self.check_sign(&result);
+        self.check_parity(&result);
+        self.registers[7] = result;
+    }
+    fn SUB(&mut self, sub: u16, carry_in: Option<u16>) {
+        self.flag = 0x02;
+        let difference: u16 = self.registers[7] as u16;
+        self.aux_carry(1, difference, sub, carry_in);
+        let result: u8 = self.check_borrow(difference, sub + carry_in.unwrap_or(0));
+
+        self.check_zero(&result);
+        self.check_sign(&result);
+        self.check_parity(&result);
+        self.registers[7] = result;
+    }
+    fn ANA(&mut self, ana: u8) {
+        self.flag &= 0x02;
+        let a = self.registers[7];
+        let result: u8 = self.registers[7] & ana;
+        if (ana | a) & 0x08 != 0 {
+            self.flag |= 0x10;
+        }
+
+        self.check_zero(&result);
+        self.check_sign(&result);
+        self.check_parity(&result);
+        self.registers[7] = result;
+    }
+    fn XOR(&mut self, xor: u8) {
+        self.flag = 0x02;
+        let result: u8 = self.registers[7] ^ xor;
+
+        self.check_zero(&result);
+        self.check_sign(&result);
+        self.check_parity(&result);
+        self.registers[7] = result;
+    }
+    fn OR(&mut self, or: u8) {
+        self.flag = 0x02;
+        let result: u8 = self.registers[7] | or;
+
+        self.check_zero(&result);
+        self.check_sign(&result);
+        self.check_parity(&result);
+        self.registers[7] = result;
+    }
+    fn CMP(&mut self, cmp: u16) {
+        self.flag = 0x02;
+        let difference: u16 = self.registers[7] as u16;
+        self.aux_carry(1, difference, cmp, None);
+        let result: u8 = self.check_borrow(difference, cmp);
+
+        self.check_zero(&result);
+        self.check_sign(&result);
+        self.check_parity(&result);
+    }
+
+    //--------------Auxilary functions-----------------------
+    pub fn bdos(&mut self) {
+        match self.registers[1] {
+            2 => {
+                print!("{}", self.registers[3] as char);
+            }
+            9 => {
+                let mut addr = concatenate(self.registers[2], self.registers[3]);
+                while self.memory[addr as usize] != b'$' {
+                    print!("{}", self.memory[addr as usize] as char);
+                    addr = addr.wrapping_add(1);
+                }
+            }
+            _ => {}
+        }
+        use std::io::Write;
+        std::io::stdout().flush().unwrap();
+        self.pc = self.pop();
+    }
+    fn get_hl(&mut self) -> u16 {
+        concatenate(self.registers[4], self.registers[5])
+    }
+    fn check_carry(&mut self, sum: u16) -> u8 {
+        let carry = sum >= 256;
+        if carry {
+            self.flag |= 1;
+        } else {
+            self.flag &= 0xFE;
+        }
+        return (sum % 256) as u8;
+    }
+    fn check_borrow(&mut self, difference: u16, sub: u16) -> u8 {
+        let (result, borrow) = difference.overflowing_sub(sub);
+        if borrow {
+            self.flag |= 1;
+        } else {
+            self.flag &= 0xFE;
+        }
+        return result as u8;
+    }
+    fn check_zero(&mut self, sum: &u8) {
+        if *sum == 0 {
+            self.flag |= 64
+        } else {
+            self.flag &= 0xBF;
+        }
+    }
+    fn check_sign(&mut self, sum: &u8) {
+        if *sum & 0x80 == 0x80 {
+            self.flag |= 128;
+        } else {
+            self.flag &= 0x7F;
+        }
+    }
+    fn check_parity(&mut self, sum: &u8) {
+        let mut k: u8 = 0;
+        for i in 0..8 {
+            if (sum & 1 << i) == (1 << i) {
+                k += 1;
+            }
+        }
+        if k % 2 == 0 {
+            self.flag |= 4;
+        } else {
+            self.flag &= 0xFB;
+        }
+    }
+    fn aux_carry(&mut self, op_type: u8, a: u16, b: u16, carry: Option<u16>) {
+        match op_type {
+            0 => {
+                if (a & 0x0F) + (b & 0x0F) + carry.unwrap_or(0) > 0x0F {
+                    self.flag |= 16;
+                } else {
+                    self.flag &= 0xEF;
+                }
+            }
+            1 => {
+                if (a & 0x0F) >= ((b & 0x0F) + carry.unwrap_or(0)) {
+                    self.flag |= 16;
+                } else {
+                    self.flag &= 0xEF;
+                }
+            }
+            _ => {}
+        }
+    }
+    fn pop(&mut self) -> u16 {
+        let value: u16 = (self.memory[self.sp as usize] as u16)
+            | (self.memory[self.sp.wrapping_add(1) as usize] as u16) << 8;
+        self.sp = self.sp.wrapping_add(2);
+        value
+    }
+    fn push(&mut self, value: u16) {
+        self.sp = self.sp.wrapping_sub(2);
+        self.memory[self.sp.wrapping_add(1) as usize] = (value >> 8) as u8;
+        self.memory[self.sp as usize] = (value) as u8;
+    }
+    fn jump(&mut self) {
+        self.pc = (self.memory[self.pc as usize] as u16)
+            | (self.memory[self.pc.wrapping_add(1) as usize] as u16) << 8;
+    }
+    fn call(&mut self) {
+        self.push(self.pc.wrapping_add(2) as u16);
+        self.jump();
+    }
+    fn rst(&mut self, variant: u8) {
+        self.push(self.pc as u16);
+        self.pc = (variant as u16) * 8;
+    }
+    fn matcher<F>(&mut self, variant: u8, f: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        match variant {
+            0 => {
+                let zero: bool = (self.flag & 0x40) == 0x40;
+                if !zero {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+
+            1 => {
+                //RZ
+                let zero: bool = (self.flag & 0x40) == 0x40;
+                if zero {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            2 => {
+                let carry: bool = (self.flag & 0x01) == 0x01;
+                if !carry {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            3 => {
+                let carry: bool = (self.flag & 0x01) == 0x01;
+                if carry {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            4 => {
+                let pair: bool = (self.flag & 0x04) == 0x04;
+                if !pair {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            5 => {
+                let pair: bool = (self.flag & 0x04) == 0x04;
+                if pair {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            6 => {
+                let is_negative: bool = (self.flag & 0x80) == 0x80;
+                if !is_negative {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            7 => {
+                let is_negative: bool = (self.flag & 0x80) == 0x80;
+                if is_negative {
+                    f(self);
+                } else {
+                    self.pc = self.pc.wrapping_add(2);
+                }
+            }
+            _ => {
+                println!("somehow an issue in control");
+            }
+        }
+    }
+}
+
+fn mask(input: u8) -> [u8; 3] {
+    // 0th index: family code
+    // 1th index: variant
+    // 2nd: instruction
+    [input >> 6, (input >> 3) & 7, input & 7]
+}
+pub fn concatenate(hi: u8, low: u8) -> u16 {
+    let output: u16 = (hi as u16) << 8 | (low as u16);
+    output
+}
+fn separate(byte: u16) -> (u8, u8) {
+    ((byte >> 8) as u8, byte as u8)
+}
