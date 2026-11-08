@@ -2,7 +2,13 @@ mod cpu;
 mod graphics;
 use cpu::CPU;
 use graphics::create_image;
-use std::fs;
+use graphics::open_window;
+use std::{
+    fs, thread,
+    time::{Duration, Instant},
+};
+
+use crate::graphics::update_window;
 fn main() {
     println!("Hello, world!");
     let mut cpu: CPU = CPU::new();
@@ -16,17 +22,28 @@ fn main() {
     cpu.load_rom(&g_file, 0x0800);
     cpu.load_rom(&f_file, 0x1000);
     cpu.load_rom(&e_file, 0x1800);
+    let mut window = open_window().unwrap();
     create_image(&cpu);
-    for _ in 0..60 {
-        for _ in 0..3_500 {
-            step(&mut cpu);
-        }
+    loop {
+        for _ in 0..60 {
+            let instant = Instant::now();
+            for _ in 0..3_500 {
+                step(&mut cpu);
+            }
 
-        cpu.interrupt(1);
-        for _ in 0..3_500 {
-            step(&mut cpu);
+            cpu.interrupt(1);
+            for _ in 0..3_500 {
+                step(&mut cpu);
+            }
+            cpu.interrupt(2);
+            update_window(&cpu, &mut window);
+            let elapsed = instant.elapsed();
+            let budget = Duration::from_micros(16_667);
+            match budget.checked_sub(elapsed) {
+                Some(n) => thread::sleep(n),
+                None => continue,
+            }
         }
-        cpu.interrupt(2);
     }
 }
 fn step(cpu: &mut CPU) {

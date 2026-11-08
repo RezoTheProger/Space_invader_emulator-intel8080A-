@@ -7,6 +7,8 @@ pub struct CPU {
     pub flag: u8,
     pub halted: bool,
     pub inte: bool,
+    pub shift: u16,
+    pub offset: u8,
 }
 impl CPU {
     pub fn new() -> Self {
@@ -19,6 +21,8 @@ impl CPU {
             flag: 0x02,
             halted: false,
             inte: false,
+            shift: 0,
+            offset: 0,
         }
     }
     pub fn load_rom(&mut self, rom_data: &[u8], position: u16) {
@@ -541,12 +545,20 @@ impl CPU {
                 2 => {
                     //OUT
                     let port = self.fetch() as usize;
+                    if port == 2 {
+                        self.offset = self.registers[7] & 0x07;
+                    } else if port == 4 {
+                        self.shift = (self.shift >> 8) | ((self.registers[7] as u16) << 8);
+                    }else{
                     self.ports[port] = self.registers[7];
-                }
+                }}
                 3 => {
                     let port = self.fetch() as usize;
+                    if port == 3 {
+                        self.registers[7] = (self.shift >> (8 - self.offset)) as u8;
+                    }else{
                     self.registers[7] = self.ports[port];
-                }
+                }}
                 4 => {
                     //XTHL
                     let temp: u8 = self.registers[5];
