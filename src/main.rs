@@ -16,7 +16,7 @@ fn main() {
     cpu.load_rom(&g_file, 0x0800);
     cpu.load_rom(&f_file, 0x1000);
     cpu.load_rom(&e_file, 0x1800);
-
+    create_image(&cpu);
     for _ in 0..60 {
         for _ in 0..3_500 {
             step(&mut cpu);
