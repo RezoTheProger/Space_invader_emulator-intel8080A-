@@ -2,7 +2,6 @@ use crate::CPU;
 use minifb::Window;
 use minifb::WindowOptions;
 use std::fs;
-use std::vec;
 pub fn create_image(cpu: &CPU) {
     let grid: [[u32; 256]; 224] = create_grid(cpu);
 
@@ -37,7 +36,15 @@ fn byte_to_array(byte: u8) -> [u8; 8] {
     array2
 }
 pub fn open_window() -> Option<Window> {
-    let window = match Window::new("I love CP", 224, 256, WindowOptions{resize:true,..WindowOptions::default()}) {
+    let window = match Window::new(
+        "I love CP",
+        224,
+        256,
+        WindowOptions {
+            resize: true,
+            ..WindowOptions::default()
+        },
+    ) {
         Ok(win) => win,
         Err(err) => {
             println!("Unable to create window {}", err);
